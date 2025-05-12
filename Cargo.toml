@@ -7,6 +7,7 @@ description = "Аналог DeepDiff на Rust с Python-интерфейсом"
 
 [lib]
 name = "rustdeepdiff"
+# Это имя модуля, который будет импортироваться в Python
 crate-type = ["cdylib"]
 
 [dependencies]

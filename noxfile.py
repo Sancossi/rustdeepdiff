@@ -3,19 +3,14 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from enum import Enum
 
 import nox
 from nox.command import CommandFailed
 
-
-@dataclass
-class Config:
-    DEFAULT_PYTHON_VERSION: str = "3.10"
-    CUSTOM_REPO_URL: str = "https://pypi.org/simple"
-    USE_VENV: bool = True
+nox.options.default_venv_backend = "uv"
 
 
-# Определяем версию Python из файла .python-version, если он существует
 def get_python_version():
     python_version_file = ".python-version"
     if not os.path.exists(python_version_file):
@@ -27,23 +22,24 @@ def get_python_version():
             version = ".".join(version.split(".")[:2])
         return version
 
+class Platform(str, Enum):
+    WINDOWS = "win32"
+    MACOS = "darwin"
+    LINUX = "linux"
 
-# Настройки
-PYTHON_VERSION = get_python_version()
-CUSTOM_REPO_URL = "https://your-custom-repo-url/simple"  # URL вашего репозитория
-
-# Указываем, что мы используем uv вместо pip
-nox.options.default_venv_backend = "uv"
+@dataclass
+class Config:
+    DEFAULT_PYTHON_VERSION: str = get_python_version()
+    CUSTOM_REPO_URL: str = "https://pypi.org/simple"
+    USE_VENV: bool = True
 
 
 def install_python(version=Config.DEFAULT_PYTHON_VERSION):
     """Установка указанной версии Python, если она отсутствует"""
     try:
-        # Проверяем, установлена ли уже нужная версия Python
         import subprocess
 
-        # В Windows проверяем по-другому
-        if sys.platform == Config.WINDOWS:
+        if sys.platform == Platform.WINDOWS:
             python_cmd = f"py -{version}"
         else:
             python_cmd = f"python{version}"
@@ -51,12 +47,12 @@ def install_python(version=Config.DEFAULT_PYTHON_VERSION):
         result = subprocess.run(
             (
                 [python_cmd, "--version"]
-                if sys.platform == "win32"
+                if sys.platform == Platform.WINDOWS
                 else [python_cmd, "--version"]
             ),
             capture_output=True,
             text=True,
-            shell=(sys.platform == "win32"),  # Используем shell в Windows
+            shell=(sys.platform == Platform.WINDOWS),
         )
 
         if result.returncode == 0:
@@ -65,14 +61,13 @@ def install_python(version=Config.DEFAULT_PYTHON_VERSION):
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
 
-    # Устанавливаем Python в зависимости от ОС
-    if sys.platform == Config.LINUX:
+    if sys.platform == Platform.LINUX:
         os.system(
             f"sudo apt-get update && sudo apt-get install -y python{version} python{version}-venv"
         )
-    elif sys.platform == Config.MACOS:
+    elif sys.platform == Platform.MACOS:
         os.system(f"brew install python@{version}")
-    elif sys.platform == Config.WINDOWS:
+    elif sys.platform == Platform.WINDOWS:
         print(f"Для Windows рекомендуется использовать Python Launcher (py).")
         print(
             f"Проверьте, установлен ли Python {version} с помощью команды: py -{version} --version"
@@ -81,7 +76,6 @@ def install_python(version=Config.DEFAULT_PYTHON_VERSION):
             f"Если нет, скачайте и установите Python {version} с https://www.python.org/downloads/"
         )
 
-        # Предлагаем автоматически открыть страницу загрузки
         download_url = f"https://www.python.org/downloads/release/python-{version.replace('.', '')}"
         open_browser = input(f"Открыть страницу загрузки Python {version}? (y/n): ")
         if open_browser.lower() == "y":
@@ -113,17 +107,36 @@ def create_venv_unix(session):
 def create_venv(session):
     if Config.USE_VENV and not os.path.exists("venv"):
         session.log("Создание виртуального окружения...")
-        if sys.platform == "win32":
-            create_venv_win32(session)
+        if sys.platform == Platform.WINDOWS:
+            session.run(
+                "py", 
+                f"-{Config.DEFAULT_PYTHON_VERSION}", 
+                "-m", 
+                "venv", 
+                "venv", 
+                "--upgrade-deps",
+                external=True
+            )
+            
+            pip_path = os.path.join("venv", "Scripts", "pip.exe")
+            if not os.path.exists(pip_path):
+                session.log("Pip не найден, устанавливаем вручную...")
+                session.run(
+                    os.path.join("venv", "Scripts", "python.exe"),
+                    "-m",
+                    "ensurepip",
+                    "--upgrade",
+                    external=True
+                )
         else:
-            create_venv_unix(session)
+            session.run("python", "-m", "venv", "venv", "--upgrade-deps", external=True)
 
 
 @nox.session(python=Config.DEFAULT_PYTHON_VERSION)
 def setup(session):
     """Настройка окружения: установка Python и создание venv"""
 
-    if sys.platform == Config.WINDOWS:
+    if sys.platform == Platform.WINDOWS:
         try:
             session.run(
                 "py", f"-{Config.DEFAULT_PYTHON_VERSION}", "--version", external=True
@@ -141,23 +154,44 @@ def setup(session):
 
     if Config.USE_VENV and not os.path.exists("venv"):
         session.log("Создание виртуального окружения...")
-        if sys.platform == "win32":
-            session.run(
-                "py",
-                f"-{Config.DEFAULT_PYTHON_VERSION}",
-                "-m",
-                "venv",
-                "venv",
-                external=True,
-            )
+        if sys.platform == Platform.WINDOWS:
+            try:
+                session.run(
+                    "py",
+                    f"-{Config.DEFAULT_PYTHON_VERSION}",
+                    "-m",
+                    "venv",
+                    "venv",
+                    "--upgrade-deps",
+                    external=True,
+                )
+                
+                pip_path = os.path.join("venv", "Scripts", "pip.exe")
+                if not os.path.exists(pip_path):
+                    session.log("Pip не найден, устанавливаем вручную...")
+                    session.run(
+                        os.path.join("venv", "Scripts", "python.exe"),
+                        "-m",
+                        "ensurepip",
+                        "--upgrade",
+                        external=True
+                    )
+            except:
+                session.error("Не удалось создать виртуальное окружение")
         else:
-            session.run("python", "-m", "venv", "venv", external=True)
+            session.run("python", "-m", "venv", "venv", "--upgrade-deps", external=True)
 
-        venv_pip = (
+        venv_pip = os.path.abspath(
             os.path.join("venv", "bin", "pip")
-            if sys.platform != "win32"
-            else os.path.join("venv", "Scripts", "pip")
+            if sys.platform != Platform.WINDOWS
+            else os.path.join("venv", "Scripts", "pip.exe")
         )
+        
+        if not os.path.exists(venv_pip):
+            session.error(f"Pip не найден по пути {venv_pip}")
+            
+        session.log(f"Установка uv с помощью {venv_pip}")
+        session.run(venv_pip, "install", "--upgrade", "pip", "setuptools", "wheel", external=True)
         session.run(venv_pip, "install", "uv", external=True)
 
 
@@ -195,10 +229,12 @@ def format(session):
     session.install("--index-url", Config.CUSTOM_REPO_URL, "black", "isort", "ruff")
     session.log("Форматирование кода...")
     session.run("black", ".")
-    session.run("ruff", "format", ".")
 
-    session.log("Сортировака импортов...")
+    session.log("Cортировка импортов...")
     session.run("isort", ".")
+
+    session.log("Проверка кода на ошибки...")
+    session.run("ruff", "format", ".")
 
 
 @nox.session(python=Config.DEFAULT_PYTHON_VERSION)
