@@ -7,4 +7,4 @@ setup(
     rust_extensions=[RustExtension("rustdeepdiff.rustdeepdiff", binding=Binding.PyO3)],
     packages=["rustdeepdiff"],
     zip_safe=False,
-) 
+)
